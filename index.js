@@ -145,7 +145,7 @@ if (require.main === module) {
                   if (name && src && mode) {
                     if (/^#[a-z][a-z0-9\-]*$/i.test(src)) {
                       const scriptEl = selector.find(html, src, true);
-                      if (scriptEl && scriptEl.tagName === 'SCRIPT' && scriptEl.childNodes.length > 0 && scriptEl.childNodes[0].nodeType === Node.TEXT_NODE) {
+                      if (scriptEl && scriptEl.childNodes.length === 1 && scriptEl.childNodes[0].nodeType === Node.TEXT_NODE) {
                         const localPort = port++;
                         windowEval(
                           scriptEl.childNodes[0].value,
