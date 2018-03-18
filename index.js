@@ -7,8 +7,6 @@ const http = require('http');
 const zlib = require('zlib');
 
 const minimist = require('minimist');
-const mkdirp = require('mkdirp');
-const rimraf = require('rimraf');
 const wld = require('wld');
 const express = require('express');
 const expressPut = require('express-put')(express);
@@ -82,7 +80,7 @@ if (require.main === module) {
             }
           });
         }),
-        onhostscript: (name, src, mode, scriptString, installDirectory, bindings) => {
+        onhostscript: (name, src, mode, scriptString, bindings) => {
           if (mode === 'javascript') {
             return new Promise((accept, reject) => {
               const localPort = port++;
@@ -97,6 +95,7 @@ if (require.main === module) {
               accept(`http://127.0.0.1:${localPort}`);
             });
           } else if (mode === 'nodejs') {
+            console.log('got nodejs');
             return new Promise((accept, reject) => {
               const localPort = port++;
 
@@ -107,7 +106,7 @@ if (require.main === module) {
                   _makeContext(Object.assign({
                     PORT: localPort,
                   }, _formatBindings(bindings))),
-                  path.join(src, installDirectory)
+                  src
                 );
               } catch(e) {
                 err = e;
@@ -155,61 +154,28 @@ if (require.main === module) {
           throw err;
         });
     } else {
-      const installDirectory = path.join(__dirname, '.intrakit');
-      const nodeModulesDirectory = path.join(installDirectory, 'node_modules');
-
-      new Promise((accept, reject) => {
-        rimraf(nodeModulesDirectory, err => {
-          if (!err) {
-            accept();
-          } else {
-            reject(err);
-          }
-        });
+      wld(fileName, {
+        ondirectory: (name, src, bindings) => {
+          console.log('got directory', {name, src});
+          return Promise.resolve();
+        },
+        onhostscript: (name, src, mode, scriptString, bindings) => {
+          console.log('got host script', {name, src});
+          return Promise.resolve();
+        },
       })
-        .then(() => new Promise((accept, reject) => {
-          mkdirp(nodeModulesDirectory, err => {
-            if (!err) {
-              accept();
-            } else {
-              reject(err);
-            }
+        .then(o => new Promise((accept, reject) => {
+          const {indexHtml, bindings, installDirectory} = o;
+          const rs = tarFs.pack(installDirectory);
+          const ws = fs.createWriteStream(output);
+          rs.pipe(zlib.createGzip()).pipe(ws);
+          ws.on('finish', () => {
+            accept();
           });
-        }))
-        .then(() => new Promise((accept, reject) => {
-          fs.writeFile(path.join(installDirectory, 'package.json'), JSON.stringify({}), err => {
-            if (!err) {
-              accept();
-            } else {
-              reject(err);
-            }
+          rs.on('error', err => {
+            reject(err);
           });
-        }))
-        .then(() => {
-          return wld(fileName, {
-            installDirectory,
-            ondirectory: (name, src, bindings) => {
-              console.log('got directory', {name, src});
-              return Promise.resolve();
-            },
-            onhostscript: (name, src, mode, scriptString, installDirectory, bindings) => {
-              console.log('got host script', {name, src});
-              return Promise.resolve();
-            },
-          })
-            .then(o => new Promise((accept, reject) => {
-              const {indexHtml, bindings} = o;
-              const rs = tarFs.pack(__dirname);
-              const ws = fs.createWriteStream(output);
-              rs.pipe(zlib.createGzip()).pipe(ws);
-              ws.on('finish', () => {
-                accept();
-              });
-              rs.on('error', err => {
-                reject(err);
-              });
-            }));
-        });
+        }));
     }
   } else {
     console.warn('usage: intrakit [-d] <fileName>');
