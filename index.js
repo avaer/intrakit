@@ -44,7 +44,7 @@ if (require.main === module) {
           const localPort = port++;
           const context = {
             window: null,
-            console,
+            require,
             process: new Proxy(process, {
               get(target, key, value) {
                 if (key === 'env') {
@@ -56,6 +56,7 @@ if (require.main === module) {
                 }
               },
             }),
+            console,
           };
           context.window = context;
           return context;
