@@ -156,9 +156,7 @@ if (require.main === module) {
         });
     } else {
       wld(fileName, {
-        ondirectory: (name, src, installDirectory, bindings) => {
-          return Promise.resolve();
-        },
+        ondirectory: (name, src, installDirectory, bindings) => Promise.resolve(path.join('/', name)),
         onhostscript: (name, src, mode, scriptString, installDirectory, bindings) => new Promise((accept, reject) => {
           const linksDirectory = path.join(installDirectory, 'links');
 
@@ -166,7 +164,7 @@ if (require.main === module) {
             if (!err) {
               fs.writeFile(path.join(linksDirectory, name), scriptString, err => {
                 if (!err) {
-                  accept();
+                  accept('/');
                 } else {
                   reject(err);
                 }
