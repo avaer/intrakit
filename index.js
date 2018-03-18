@@ -4,7 +4,6 @@ const fs = require('fs');
 const url = require('url');
 const {URL} = url;
 const http = require('http');
-const vm = require('vm');
 const child_process = require('child_process');
 const os = require('os');
 
@@ -41,10 +40,26 @@ if (require.main === module) {
 
         const baseUrl = 'file://' + __dirname + '/';
 
-        const context = {
-          console,
+        const _makeContext = () => {
+          const localPort = port++;
+          const context = {
+            window: null,
+            console,
+            process: new Proxy(process, {
+              get(target, key, value) {
+                if (key === 'env') {
+                  return Object.assign({}, target.env, {
+                    PORT: localPort,
+                  });
+                } else {
+                  return target[key];
+                }
+              },
+            }),
+          };
+          context.window = context;
+          return context;
         };
-        vm.createContext(context);
 
         traverseAsync(html, async el => {
           if (el.tagName === 'LINK') {
@@ -84,7 +99,7 @@ if (require.main === module) {
                 if (/^#[a-z][a-z0-9\-]*$/i.test(src)) {
                   const scriptEl = selector.find(html, src, true);
                   if (scriptEl && scriptEl.tagName === 'SCRIPT' && scriptEl.childNodes.length > 0 && scriptEl.childNodes[0].nodeType === Node.TEXT_NODE) {
-                    windowEval(scriptEl.childNodes[0].value, context, url);
+                    windowEval(scriptEl.childNodes[0].value, _makeContext(), url);
                   } else {
                     console.warn(`${fileName}:${el.location.line}:${el.location.col}: ignoring invalid link script tag reference ${JSON.stringify(src)}`);
                   }
@@ -100,7 +115,7 @@ if (require.main === module) {
                         }
                       })
                       .then(s => {
-                        windowEval(s, context, url);
+                        windowEval(s, _makeContext(), url);
                       });
                   } else if (mode === 'nodejs') {
                     return new Promise((accept, reject) => {
@@ -174,7 +189,7 @@ if (require.main === module) {
                                   if (!err) {
                                     let result, err;
                                     try {
-                                      result = windowEval(s, context, path.join(src, p));
+                                      result = windowEval(s, _makeContext(), path.join(src, p));
                                     } catch(e) {
                                       err = e;
                                     }
