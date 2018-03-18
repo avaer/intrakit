@@ -2,10 +2,12 @@ const path = require('path');
 const fs = require('fs');
 const url = require('url');
 const {URL} = url;
+const vm = require('vm');
 const util = require('util');
 const parse5 = require('parse5');
 const {fromAST, traverseAsync} = require('html-el');
 const fetch = require('window-fetch');
+const windowEval = require('window-eval');
 
 if (require.main === module) {
   const fileName = process.argv[2];
@@ -18,7 +20,14 @@ if (require.main === module) {
         documentAst.tagName = 'document';
         const document = fromAST(documentAst);
         const html = document.childNodes.find(el => el.tagName === 'HTML');
+
         const baseUrl = 'file://' + __dirname + '/';
+
+        const context = {
+          console,
+        };
+        vm.createContext(context);
+
         traverseAsync(html, async el => {
           if (el.tagName === 'LINK') {
             const rel = el.getAttribute('rel');
@@ -49,7 +58,7 @@ if (require.main === module) {
                   })
                   .then(s => {
                     if (mode === 'javascript') {
-                      console.log('got javascript', s);
+                      windowEval(s, context, url);
                     } else if (mode === 'nodejs') {
                       console.log('got nodejs', s);
                     }
