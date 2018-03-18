@@ -23,7 +23,7 @@
     "parse5": "^4.0.0",
     "selector-lite": "^0.1.1",
     "tmp": "0.0.33",
-    "window-eval": "0.0.8",
+    "window-eval-native": "0.0.3",
     "window-fetch": "0.0.5",
     "yarn": "^1.5.1"
   }

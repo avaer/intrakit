@@ -14,7 +14,7 @@ const parse5 = require('parse5');
 const {Node, fromAST, traverseAsync} = require('html-el');
 const selector = require('selector-lite');
 const fetch = require('window-fetch');
-const windowEval = require('window-eval');
+const windowEval = require('window-eval-native');
 const tmp = require('tmp');
 
 let port = parseInt(process.env['PORT'], 10) || 8000;
