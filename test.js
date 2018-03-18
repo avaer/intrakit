@@ -1,8 +1,9 @@
-console.log('Hello, world 1');
+const port = process.env['PORT'];
+const rootDirectory = process.env['LINK_root-directory'];
+console.log('Hello, world 1', {port, rootDirectory});
 
 const http = require('http');
 
-const port = process.env['PORT'];
 http.createServer((req, res) => {
   res.end(`got req: ${JSON.stringify(req.url)}\n`);
 })

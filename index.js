@@ -39,18 +39,16 @@ if (require.main === module) {
         const html = document.childNodes.find(el => el.tagName === 'HTML');
 
         const baseUrl = 'file://' + __dirname + '/';
+        const bindings = {};
 
-        const _makeContext = () => {
-          const localPort = port++;
+        const _makeContext = o => {
           const context = {
             window: null,
             require,
             process: new Proxy(process, {
               get(target, key, value) {
                 if (key === 'env') {
-                  return Object.assign({}, target.env, {
-                    PORT: localPort,
-                  });
+                  return Object.assign({}, target.env, o);
                 } else {
                   return target[key];
                 }
@@ -60,6 +58,13 @@ if (require.main === module) {
           };
           context.window = context;
           return context;
+        };
+        const _formatBindings = bindings => {
+          const result = {};
+          for (const k in bindings) {
+            result['LINK_' + k] = bindings[k];
+          }
+          return result;
         };
 
         traverseAsync(html, async el => {
@@ -71,9 +76,13 @@ if (require.main === module) {
               if (name && src) {
                 await new Promise((accept, reject) => {
                   const server = http.createServer(expressPut(src, path.join('/', name)));
-                  server.listen(port++, err => {
+                  const localPort = port++;
+                  server.listen(localPort, err => {
                     if (!err) {
                       server.unref();
+
+                      bindings[name] = `http://127.0.0.1:${localPort}`;
+
                       accept();
                     } else {
                       reject(err);
@@ -100,7 +109,15 @@ if (require.main === module) {
                 if (/^#[a-z][a-z0-9\-]*$/i.test(src)) {
                   const scriptEl = selector.find(html, src, true);
                   if (scriptEl && scriptEl.tagName === 'SCRIPT' && scriptEl.childNodes.length > 0 && scriptEl.childNodes[0].nodeType === Node.TEXT_NODE) {
-                    windowEval(scriptEl.childNodes[0].value, _makeContext(), url);
+                    const localPort = port++;
+                    windowEval(
+                      scriptEl.childNodes[0].value,
+                      _makeContext(Object.assign({
+                        PORT: localPort,
+                      }, _formatBindings(bindings))),
+                      url
+                    );
+                    bindings[name] = `http://127.0.0.1:${localPort}`;
                   } else {
                     console.warn(`${fileName}:${el.location.line}:${el.location.col}: ignoring invalid link script tag reference ${JSON.stringify(src)}`);
                   }
@@ -116,7 +133,15 @@ if (require.main === module) {
                         }
                       })
                       .then(s => {
-                        windowEval(s, _makeContext(), url);
+                        const localPort = port++;
+                        windowEval(
+                          s,
+                          _makeContext(Object.assign({
+                            PORT: localPort,
+                          }, _formatBindings(bindings))),
+                          url
+                        );
+                        bindings[name] = `http://127.0.0.1:${localPort}`;
                       });
                   } else if (mode === 'nodejs') {
                     return new Promise((accept, reject) => {
@@ -188,14 +213,24 @@ if (require.main === module) {
                                 const mainScriptPath = path.join(p, 'node_modules', moduleName, mainPath);
                                 fs.readFile(mainScriptPath, 'utf8', (err, s) => {
                                   if (!err) {
-                                    let result, err;
+                                    const localPort = port++;
+
+                                    let err;
                                     try {
-                                      result = windowEval(s, _makeContext(), path.join(src, p));
+                                      windowEval(
+                                        s,
+                                        _makeContext(Object.assign({
+                                          PORT: localPort,
+                                        }, _formatBindings(bindings))),
+                                        path.join(src, p)
+                                      );
                                     } catch(e) {
                                       err = e;
                                     }
+
                                     if (!err) {
-                                      accept(result);
+                                      bindings[name] = `http://127.0.0.1:${localPort}`;
+                                      accept();
                                     } else {
                                       reject(err);
                                     }
