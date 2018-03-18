@@ -157,7 +157,17 @@ if (require.main === module) {
                                 const mainScriptPath = path.join(p, 'node_modules', moduleName, mainPath);
                                 fs.readFile(mainScriptPath, 'utf8', (err, s) => {
                                   if (!err) {
-                                    windowEval(s, context, path.join(src, p));
+                                    let result, err;
+                                    try {
+                                      result = windowEval(s, context, path.join(src, p));
+                                    } catch(e) {
+                                      err = e;
+                                    }
+                                    if (!err) {
+                                      accept(result);
+                                    } else {
+                                      reject(err);
+                                    }
                                   } else {
                                     reject(err);
                                   }
