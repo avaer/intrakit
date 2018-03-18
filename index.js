@@ -13,14 +13,6 @@ const tmp = require('tmp');
 
 let port = parseInt(process.env['PORT'], 10) || 8000;
 
-const npmCommands = {
-  install: {
-    cmd: [
-      'node', require.resolve('yarn/bin/yarn.js'), 'add',
-    ],
-  },
-};
-
 if (require.main === module) {
   const fileName = process.argv[2];
   if (fileName) {
