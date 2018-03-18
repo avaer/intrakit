@@ -19,6 +19,7 @@
   "dependencies": {
     "html-el": "0.0.1",
     "parse5": "^4.0.0",
+    "selector-lite": "^0.1.1",
     "window-eval": "0.0.8",
     "window-fetch": "0.0.5"
   }

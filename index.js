@@ -5,7 +5,8 @@ const {URL} = url;
 const vm = require('vm');
 const util = require('util');
 const parse5 = require('parse5');
-const {fromAST, traverseAsync} = require('html-el');
+const {Node, fromAST, traverseAsync} = require('html-el');
+const selector = require('selector-lite');
 const fetch = require('window-fetch');
 const windowEval = require('window-eval');
 
@@ -47,25 +48,34 @@ if (require.main === module) {
                 }
               })();
               if (mode) {
-                const url = new URL(src, baseUrl).href;
-                fetch(url)
-                  .then(res => {
-                    if (res.status >= 200 && res.status < 300) {
-                      return res.text();
-                    } else {
-                      return Promise.reject(new Error('invalid status code: ' + res.status));
-                    }
-                  })
-                  .then(s => {
-                    if (mode === 'javascript') {
-                      windowEval(s, context, url);
-                    } else if (mode === 'nodejs') {
-                      console.log('got nodejs', s);
-                    }
-                  })
-                  .catch(err => {
-                    throw err;
-                  });
+                if (/^#[a-z][a-z0-9\-]*$/i.test(src)) {
+                  const scriptEl = selector.find(html, src, true);
+                  if (scriptEl && scriptEl.tagName === 'SCRIPT' && scriptEl.childNodes.length > 0 && scriptEl.childNodes[0].nodeType === Node.TEXT_NODE) {
+                    windowEval(scriptEl.childNodes[0].value, context, url);
+                  } else {
+                    console.warn(`${fileName}:${el.location.line}:${el.location.col}: ignoring invalid link script tag reference ${JSON.stringify(src)}`);
+                  }
+                } else {
+                  const url = new URL(src, baseUrl).href;
+                  await fetch(url)
+                    .then(res => {
+                      if (res.status >= 200 && res.status < 300) {
+                        return res.text();
+                      } else {
+                        return Promise.reject(new Error('invalid status code: ' + res.status));
+                      }
+                    })
+                    .then(s => {
+                      if (mode === 'javascript') {
+                        windowEval(s, context, url);
+                      } else if (mode === 'nodejs') {
+                        console.log('got nodejs', s.length); // XXX
+                      }
+                    })
+                    .catch(err => {
+                      throw err;
+                    });
+                }
               } else {
                 console.warn(`${fileName}:${el.location.line}:${el.location.col}: ignoring unknown link hostScript type ${JSON.stringify(type)}`);
               }
