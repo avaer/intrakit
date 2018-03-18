@@ -45,12 +45,6 @@ if (require.main === module) {
     })
       .then(document => {
         const html = document.childNodes.find(el => el.tagName === 'HTML');
-        const staticApp = express();
-        staticApp.get('/', (req, res, next) => {
-          const htmlString = parse5.serialize(toAST(document));
-          res.set('Content-Type', 'text/html');
-          res.end(htmlString);
-        });
         const staticPort = port++;
         const baseUrl = 'file://' + __dirname + '/';
         const bindings = {};
@@ -73,6 +67,10 @@ if (require.main === module) {
           context.window = context;
           return context;
         };
+        const _getLocalSrc = src => {
+          const p = url.parse(src).pathname;
+          return p && path.join('/', p);
+        };
         const _setAttribute = (attrs, name, value) => {
           const attr = attrs.find(attr => attr.name === name);
           if (attr) {
@@ -87,7 +85,7 @@ if (require.main === module) {
         const _formatBindings = bindings => {
           const result = {};
           for (const k in bindings) {
-            result['LINK_' + k] = bindings[k];
+            result['LINK_' + k] = bindings[k].boundUrl;
           }
           return result;
         };
@@ -110,7 +108,11 @@ if (require.main === module) {
 
                       const boundUrl = `http://127.0.0.1:${localPort}`;
                       _setAttribute(el.attrs, 'boundUrl', boundUrl);
-                      bindings[name] = boundUrl;
+                      bindings[name] = {
+                        localSrc: null,
+                        boundUrl,
+                        scriptString: null,
+                      };
 
                       accept();
                     } else {
@@ -138,9 +140,10 @@ if (require.main === module) {
                 if (/^#[a-z][a-z0-9\-]*$/i.test(src)) {
                   const scriptEl = selector.find(html, src, true);
                   if (scriptEl && scriptEl.childNodes.length === 1 && scriptEl.childNodes[0].nodeType === Node.TEXT_NODE) {
+                    const scriptString = scriptEl.childNodes[0].value;
                     const localPort = port++;
                     windowEval(
-                      scriptEl.childNodes[0].value,
+                      scriptString,
                       _makeContext(Object.assign({
                         PORT: localPort,
                       }, _formatBindings(bindings))),
@@ -148,7 +151,11 @@ if (require.main === module) {
                     );
                     const boundUrl = `http://127.0.0.1:${localPort}`;
                     _setAttribute(el.attrs, 'boundUrl', boundUrl);
-                    bindings[name] = boundUrl;
+                    bindings[name] = {
+                      localSrc: _getLocalSrc(src),
+                      boundUrl,
+                      scriptString,
+                    };
                   } else {
                     console.warn(`${fileName}:${el.location.line}:${el.location.col}: ignoring invalid link script tag reference ${JSON.stringify(src)}`);
                   }
@@ -163,10 +170,10 @@ if (require.main === module) {
                           return Promise.reject(new Error('invalid status code: ' + res.status));
                         }
                       })
-                      .then(s => {
+                      .then(scriptString => {
                         const localPort = port++;
                         windowEval(
-                          s,
+                          scriptString,
                           _makeContext(Object.assign({
                             PORT: localPort,
                           }, _formatBindings(bindings))),
@@ -174,7 +181,11 @@ if (require.main === module) {
                         );
                         const boundUrl = `http://127.0.0.1:${localPort}`;
                         _setAttribute(el.attrs, 'boundUrl', boundUrl);
-                        bindings[name] = boundUrl;
+                        bindings[name] = {
+                          localSrc: _getLocalSrc(src),
+                          boundUrl,
+                          scriptString,
+                        };
                       });
                   } else if (mode === 'nodejs') {
                     return new Promise((accept, reject) => {
@@ -242,14 +253,14 @@ if (require.main === module) {
                                 const j = JSON.parse(s);
                                 const {main: mainPath} = j;
                                 const mainScriptPath = path.join(p, 'node_modules', moduleName, mainPath);
-                                fs.readFile(mainScriptPath, 'utf8', (err, s) => {
+                                fs.readFile(mainScriptPath, 'utf8', (err, scriptString) => {
                                   if (!err) {
                                     const localPort = port++;
 
                                     let err;
                                     try {
                                       windowEval(
-                                        s,
+                                        scriptString,
                                         _makeContext(Object.assign({
                                           PORT: localPort,
                                         }, _formatBindings(bindings))),
@@ -262,7 +273,11 @@ if (require.main === module) {
                                     if (!err) {
                                       const boundUrl = `http://127.0.0.1:${localPort}`;
                                       _setAttribute(el.attrs, 'boundUrl', boundUrl);
-                                      bindings[name] = boundUrl;
+                                      bindings[name] = {
+                                        localSrc: _getLocalSrc(src),
+                                        boundUrl,
+                                        scriptString,
+                                      };
 
                                       accept();
                                     } else {
@@ -289,6 +304,23 @@ if (require.main === module) {
           }
         })
           .then(() => new Promise((accept, reject) => {
+            const staticApp = express();
+            staticApp.get('/', (req, res, next) => {
+              const htmlString = parse5.serialize(toAST(document));
+              res.set('Content-Type', 'text/html');
+              res.end(htmlString);
+            });
+            staticApp.get('*', (req, res, next) => {
+              for (const k in bindings) {
+                const binding = bindings[k];
+                if (binding.localSrc === req.path) {
+                  res.type('application/javascript');
+                  res.end(binding.scriptString);
+                  return;
+                }
+              }
+              next();
+            });
             const staticServer = http.createServer(staticApp);
             staticServer.listen(staticPort, err => {
               if (!err) {
