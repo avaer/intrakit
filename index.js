@@ -4,6 +4,7 @@ const fs = require('fs');
 const url = require('url');
 const {URL} = url;
 const http = require('http');
+const zlib = require('zlib');
 
 const minimist = require('minimist');
 const mkdirp = require('mkdirp');
@@ -12,6 +13,7 @@ const wld = require('wld');
 const express = require('express');
 const expressPut = require('express-put')(express);
 const windowEval = require('window-eval-native');
+const tarFs = require('tar-fs');
 
 let port = parseInt(process.env['PORT'], 10) || 8000;
 
@@ -19,7 +21,12 @@ if (require.main === module) {
   const args = minimist(process.argv.slice(2), {
     alias: {
       d: 'deploy',
+      o: 'output',
     },
+    string: [
+      'output',
+      'o',
+    ],
     boolean: [
       'deploy',
       'd',
@@ -28,6 +35,7 @@ if (require.main === module) {
   const [fileName] = args._;
   if (fileName) {
     const deploy = !!args.deploy;
+    const output = args.output || path.join(process.cwd(), 'bundle.tar.gz');
 
     if (!deploy) {
       const staticPort = port++;
@@ -147,14 +155,6 @@ if (require.main === module) {
           throw err;
         });
     } else {
-      /* const _formatBindings = bindings => {
-        const result = {};
-        for (const k in bindings) {
-          result['LINK_' + k] = bindings[k].boundUrl;
-        }
-        return result;
-      }; */
-
       const installDirectory = path.join(__dirname, '.intrakit');
       const nodeModulesDirectory = path.join(installDirectory, 'node_modules');
 
@@ -196,7 +196,19 @@ if (require.main === module) {
               console.log('got host script', {name, src});
               return Promise.resolve();
             },
-          });
+          })
+            .then(o => new Promise((accept, reject) => {
+              const {indexHtml, bindings} = o;
+              const rs = tarFs.pack(__dirname);
+              const ws = fs.createWriteStream(output);
+              rs.pipe(zlib.createGzip()).pipe(ws);
+              ws.on('finish', () => {
+                accept();
+              });
+              rs.on('error', err => {
+                reject(err);
+              });
+            }));
         });
     }
   } else {
