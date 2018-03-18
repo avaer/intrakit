@@ -3,16 +3,21 @@ const path = require('path');
 const fs = require('fs');
 const url = require('url');
 const {URL} = url;
+const http = require('http');
 const vm = require('vm');
 const child_process = require('child_process');
 const os = require('os');
 
+const express = require('express');
+const expressPut = require('express-put')(express);
 const parse5 = require('parse5');
 const {Node, fromAST, traverseAsync} = require('html-el');
 const selector = require('selector-lite');
 const fetch = require('window-fetch');
 const windowEval = require('window-eval');
 const tmp = require('tmp');
+
+let port = parseInt(process.env['PORT'], 10) || 8000;
 
 const npmCommands = {
   install: {
@@ -48,7 +53,17 @@ if (require.main === module) {
               const name = el.getAttribute('name');
               const src = el.getAttribute('src');
               if (name && src) {
-                console.log('got directory', name, src); // XXX
+                await new Promise((accept, reject) => {
+                  const server = http.createServer(expressPut(src, path.join('/', name)));
+                  server.listen(port++, err => {
+                    if (!err) {
+                      server.unref();
+                      accept();
+                    } else {
+                      reject(err);
+                    }
+                  });
+                });
               } else {
                 console.warn(`${fileName}:${el.location.line}:${el.location.col}: invalid attributes in directory link ${JSON.stringify({name, src})}`);
               }
