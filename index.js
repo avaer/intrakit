@@ -7,6 +7,7 @@ const http = require('http');
 const zlib = require('zlib');
 
 const minimist = require('minimist');
+const mkdirp = require('mkdirp');
 const wld = require('wld');
 const express = require('express');
 const expressPut = require('express-put')(express);
@@ -155,27 +156,45 @@ if (require.main === module) {
         });
     } else {
       wld(fileName, {
-        ondirectory: (name, src, bindings) => {
-          console.log('got directory', {name, src});
+        ondirectory: (name, src, installDirectory, bindings) => {
           return Promise.resolve();
         },
-        onhostscript: (name, src, mode, scriptString, bindings) => {
-          console.log('got host script', {name, src});
-          return Promise.resolve();
-        },
+        onhostscript: (name, src, mode, scriptString, installDirectory, bindings) => new Promise((accept, reject) => {
+          const linksDirectory = path.join(installDirectory, 'links');
+
+          mkdirp(linksDirectory, err => {
+            if (!err) {
+              fs.writeFile(path.join(linksDirectory, name), scriptString, err => {
+                if (!err) {
+                  accept();
+                } else {
+                  reject(err);
+                }
+              });
+            } else {
+              reject(err);
+            }
+          });
+        }),
       })
-        .then(o => new Promise((accept, reject) => {
-          const {indexHtml, bindings, installDirectory} = o;
-          const rs = tarFs.pack(installDirectory);
-          const ws = fs.createWriteStream(output);
-          rs.pipe(zlib.createGzip()).pipe(ws);
-          ws.on('finish', () => {
-            accept();
-          });
-          rs.on('error', err => {
+      .then(o => new Promise((accept, reject) => {
+        const {indexHtml, bindings, installDirectory} = o;
+        fs.writeFile(path.join(installDirectory, 'index.html'), indexHtml, err => {
+          if (!err) {
+            const rs = tarFs.pack(installDirectory);
+            const ws = fs.createWriteStream(output);
+            rs.pipe(zlib.createGzip()).pipe(ws);
+            ws.on('finish', () => {
+              accept();
+            });
+            rs.on('error', err => {
+              reject(err);
+            });
+          } else {
             reject(err);
-          });
-        }));
+          }
+        });
+      }));
     }
   } else {
     console.warn('usage: intrakit [-d] <fileName>');
