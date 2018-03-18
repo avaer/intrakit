@@ -175,10 +175,40 @@ if (require.main === module) {
           });
         }),
       })
-      .then(o => new Promise((accept, reject) => {
+      .then(o => {
         const {indexHtml, bindings, installDirectory} = o;
-        fs.writeFile(path.join(installDirectory, 'index.html'), indexHtml, err => {
-          if (!err) {
+
+        return Promise.all([
+          new Promise((accept, reject) => {
+            fs.writeFile(path.join(installDirectory, 'index.html'), indexHtml, err => {
+              if (!err) {
+                accept();
+              } else {
+                reject(err);
+              }
+            });
+          }),
+          new Promise((accept, reject) => {
+            const bindingJson = {};
+            for (const k in bindings) {
+              const {rel, name, src} = bindings[k];
+              bindingJson[k] = {
+                rel,
+                name,
+                src,
+              };
+            }
+
+            fs.writeFile(path.join(installDirectory, 'binding.json'), JSON.stringify(bindingJson, null, 2), err => {
+              if (!err) {
+                accept();
+              } else {
+                reject(err);
+              }
+            });
+          }),
+        ])
+          .then(() => new Promise((accept, reject) => {
             const rs = tarFs.pack(installDirectory);
             const ws = fs.createWriteStream(output);
             rs.pipe(zlib.createGzip()).pipe(ws);
@@ -188,11 +218,8 @@ if (require.main === module) {
             rs.on('error', err => {
               reject(err);
             });
-          } else {
-            reject(err);
-          }
-        });
-      }));
+          }));
+      });
     }
   } else {
     console.warn('usage: intrakit [-d] <fileName>');
