@@ -18,6 +18,7 @@
   "homepage": "https://github.com/modulesio/intrakit#readme",
   "dependencies": {
     "html-el": "0.0.1",
-    "parse5": "^4.0.0"
+    "parse5": "^4.0.0",
+    "window-fetch": "0.0.5"
   }
 }
