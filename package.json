@@ -1,6 +1,6 @@
 {
   "name": "intrakit",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "description": "Run an HTML page as a server",
   "main": "index.js",
   "scripts": {
