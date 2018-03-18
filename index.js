@@ -1,14 +1,26 @@
+const util = require('util');
 const path = require('path');
 const fs = require('fs');
 const url = require('url');
 const {URL} = url;
 const vm = require('vm');
-const util = require('util');
+const child_process = require('child_process');
+const os = require('os');
+
 const parse5 = require('parse5');
 const {Node, fromAST, traverseAsync} = require('html-el');
 const selector = require('selector-lite');
 const fetch = require('window-fetch');
 const windowEval = require('window-eval');
+const tmp = require('tmp');
+
+const npmCommands = {
+  install: {
+    cmd: [
+      'node', require.resolve('yarn/bin/yarn.js'), 'add',
+    ],
+  },
+};
 
 if (require.main === module) {
   const fileName = process.argv[2];
@@ -33,9 +45,15 @@ if (require.main === module) {
           if (el.tagName === 'LINK') {
             const rel = el.getAttribute('rel');
             if (rel === 'directory') {
+              const name = el.getAttribute('name');
               const src = el.getAttribute('src');
-              console.log('got directory', src); // XXX
+              if (name && src) {
+                console.log('got directory', name, src); // XXX
+              } else {
+                console.warn(`${fileName}:${el.location.line}:${el.location.col}: invalid attributes in directory link ${JSON.stringify({name, src})}`);
+              }
             } else if (rel === 'hostScript') {
+              const name = el.getAttribute('name');
               const src = el.getAttribute('src');
               const type = el.getAttribute('type');
               const mode = (() => {
@@ -47,7 +65,7 @@ if (require.main === module) {
                   return null;
                 }
               })();
-              if (mode) {
+              if (name && src && mode) {
                 if (/^#[a-z][a-z0-9\-]*$/i.test(src)) {
                   const scriptEl = selector.find(html, src, true);
                   if (scriptEl && scriptEl.tagName === 'SCRIPT' && scriptEl.childNodes.length > 0 && scriptEl.childNodes[0].nodeType === Node.TEXT_NODE) {
@@ -56,28 +74,104 @@ if (require.main === module) {
                     console.warn(`${fileName}:${el.location.line}:${el.location.col}: ignoring invalid link script tag reference ${JSON.stringify(src)}`);
                   }
                 } else {
-                  const url = new URL(src, baseUrl).href;
-                  await fetch(url)
-                    .then(res => {
-                      if (res.status >= 200 && res.status < 300) {
-                        return res.text();
-                      } else {
-                        return Promise.reject(new Error('invalid status code: ' + res.status));
-                      }
-                    })
-                    .then(s => {
-                      if (mode === 'javascript') {
+                  if (mode === 'javascript') {
+                    const url = new URL(src, baseUrl).href;
+                    await fetch(url)
+                      .then(res => {
+                        if (res.status >= 200 && res.status < 300) {
+                          return res.text();
+                        } else {
+                          return Promise.reject(new Error('invalid status code: ' + res.status));
+                        }
+                      })
+                      .then(s => {
                         windowEval(s, context, url);
-                      } else if (mode === 'nodejs') {
-                        console.log('got nodejs', s.length); // XXX
-                      }
+                      });
+                  } else if (mode === 'nodejs') {
+                    return new Promise((accept, reject) => {
+                      tmp.dir((err, p) => {
+                        if (!err) {
+                          accept(p);
+                        } else {
+                          reject(err);
+                        }
+                      }, {
+                        keep: true,
+                        unsafeCleanup: true,
+                      });
                     })
-                    .catch(err => {
-                      throw err;
-                    });
+                      .then(p => {
+                        return new Promise((accept, reject) => {
+                          const npmInstall = child_process.spawn(
+                            npmCommands.install.cmd[0],
+                            npmCommands.install.cmd.slice(1).concat([
+                              src,
+                              '--production',
+                              '--mutex', 'file:' + path.join(os.tmpdir(), '.intrakit-yarn-lock'),
+                            ]),
+                            {
+                              cwd: p,
+                              env: process.env,
+                            }
+                          );
+                          // npmInstall.stdout.pipe(process.stderr);
+                          npmInstall.stderr.pipe(process.stderr);
+                          npmInstall.on('exit', code => {
+                            if (code === 0) {
+                              accept();
+                            } else {
+                              reject(new Error('npm install error: ' + code));
+                            }
+                          });
+                          npmInstall.on('error', err => {
+                            reject(err);
+                          });
+                        })
+                          .then(() => new Promise((accept, reject) => {
+                            // console.log('need to run script', src, p); // XXX
+                            const packageJsonPath = path.join(p, 'package.json');
+                            fs.lstat(packageJsonPath, (err, stats) => {
+                              if (!err) {
+                                fs.readFile(packageJsonPath, 'utf8', (err, s) => {
+                                  if (!err) {
+                                    const j = JSON.parse(s);
+                                    const {dependencies} = j;
+                                    const moduleName = Object.keys(dependencies)[0];
+                                    accept(moduleName);
+                                  } else {
+                                    reject(err);
+                                  }
+                                });
+                              } else {
+                                reject(err);
+                              }
+                            });
+                          }))
+                          .then(moduleName => new Promise((accept, reject) => {
+                            const packageJsonPath = path.join(p, 'node_modules', moduleName, 'package.json');
+                            fs.readFile(packageJsonPath, 'utf8', (err, s) => {
+                              if (!err) {
+                                const j = JSON.parse(s);
+                                const {main: mainPath} = j;
+                                // console.log('got j', p, j);
+                                const mainScriptPath = path.join(p, 'node_modules', moduleName, mainPath);
+                                fs.readFile(mainScriptPath, 'utf8', (err, s) => {
+                                  if (!err) {
+                                    windowEval(s, context, path.join(src, p));
+                                  } else {
+                                    reject(err);
+                                  }
+                                });
+                              } else {
+                                reject(err);
+                              }
+                            });
+                          }));
+                      });
+                  }
                 }
               } else {
-                console.warn(`${fileName}:${el.location.line}:${el.location.col}: ignoring unknown link hostScript type ${JSON.stringify(type)}`);
+                console.warn(`${fileName}:${el.location.line}:${el.location.col}: invalid link hostScript arguments ${JSON.stringify({name, src, type})}`);
               }
             } else {
               console.warn(`${fileName}:${el.location.line}:${el.location.col}: ignoring unknown link rel ${JSON.stringify(rel)}`);
