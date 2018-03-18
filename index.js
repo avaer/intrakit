@@ -29,235 +29,277 @@ const npmCommands = {
 if (require.main === module) {
   const fileName = process.argv[2];
   if (fileName) {
-    fs.readFile(fileName, 'utf8', (err, htmlString) => {
-      if (!err) {
-        const documentAst = parse5.parse(htmlString, {
-          locationInfo: true,
-        });
-        documentAst.tagName = 'document';
-        const document = fromAST(documentAst);
-        const html = document.childNodes.find(el => el.tagName === 'HTML');
+    new Promise((accept, reject) => {
+      fs.readFile(fileName, 'utf8', (err, htmlString) => {
+        if (!err) {
+          const documentAst = parse5.parse(htmlString, {
+            locationInfo: true,
+          });
+          documentAst.tagName = 'document';
+          const document = fromAST(documentAst);
+          const html = document.childNodes.find(el => el.tagName === 'HTML');
+          accept(html);
+        } else {
+          reject(err);
+        }
+      });
+    })
+      .then(html => {
+        return new Promise((accept, reject) => {
+          const staticApp = express();
+          staticApp.get('/', (req, res, next) => {
+            const htmlString = parse5.serialize(html);
+            res.set('Content-Type', 'text/html');
+            res.end(htmlString);
+          });
+          const staticServer = http.createServer(staticApp);
+          staticServer.listen(port++, err => {
+            if (!err) {
+              accept();
+            } else {
+              reject(err);
+            }
+          });
+        })
+          .then(() => {
+            const baseUrl = 'file://' + __dirname + '/';
+            const bindings = {};
 
-        const baseUrl = 'file://' + __dirname + '/';
-        const bindings = {};
-
-        const _makeContext = o => {
-          const context = {
-            window: null,
-            require,
-            process: new Proxy(process, {
-              get(target, key, value) {
-                if (key === 'env') {
-                  return Object.assign({}, target.env, o);
-                } else {
-                  return target[key];
-                }
-              },
-            }),
-            console,
-          };
-          context.window = context;
-          return context;
-        };
-        const _formatBindings = bindings => {
-          const result = {};
-          for (const k in bindings) {
-            result['LINK_' + k] = bindings[k];
-          }
-          return result;
-        };
-
-        traverseAsync(html, async el => {
-          if (el.tagName === 'LINK') {
-            const rel = el.getAttribute('rel');
-            if (rel === 'directory') {
-              const name = el.getAttribute('name');
-              const src = el.getAttribute('src');
-              if (name && src) {
-                await new Promise((accept, reject) => {
-                  const server = http.createServer(expressPut(src, path.join('/', name)));
-                  const localPort = port++;
-                  server.listen(localPort, err => {
-                    if (!err) {
-                      server.unref();
-
-                      bindings[name] = `http://127.0.0.1:${localPort}`;
-
-                      accept();
+            const _makeContext = o => {
+              const context = {
+                window: null,
+                require,
+                process: new Proxy(process, {
+                  get(target, key, value) {
+                    if (key === 'env') {
+                      return Object.assign({}, target.env, o);
                     } else {
-                      reject(err);
+                      return target[key];
                     }
-                  });
-                });
+                  },
+                }),
+                console,
+              };
+              context.window = context;
+              return context;
+            };
+            const _setAttribute = (attrs, name, value) => {
+              const attr = attrs.find(attr => attr.name === name);
+              if (attr) {
+                attr.value = value;
               } else {
-                console.warn(`${fileName}:${el.location.line}:${el.location.col}: invalid attributes in directory link ${JSON.stringify({name, src})}`);
+                attrs.push({
+                  name,
+                  value,
+                });
               }
-            } else if (rel === 'hostScript') {
-              const name = el.getAttribute('name');
-              const src = el.getAttribute('src');
-              const type = el.getAttribute('type');
-              const mode = (() => {
-                if (!type || /^(?:(?:text|application)\/javascript|application\/ecmascript)$/.test(type)) {
-                  return 'javascript';
-                } else if (type === 'application/nodejs') {
-                  return 'nodejs';
-                } else {
-                  return null;
-                }
-              })();
-              if (name && src && mode) {
-                if (/^#[a-z][a-z0-9\-]*$/i.test(src)) {
-                  const scriptEl = selector.find(html, src, true);
-                  if (scriptEl && scriptEl.tagName === 'SCRIPT' && scriptEl.childNodes.length > 0 && scriptEl.childNodes[0].nodeType === Node.TEXT_NODE) {
-                    const localPort = port++;
-                    windowEval(
-                      scriptEl.childNodes[0].value,
-                      _makeContext(Object.assign({
-                        PORT: localPort,
-                      }, _formatBindings(bindings))),
-                      url
-                    );
-                    bindings[name] = `http://127.0.0.1:${localPort}`;
-                  } else {
-                    console.warn(`${fileName}:${el.location.line}:${el.location.col}: ignoring invalid link script tag reference ${JSON.stringify(src)}`);
-                  }
-                } else {
-                  if (mode === 'javascript') {
-                    const url = new URL(src, baseUrl).href;
-                    await fetch(url)
-                      .then(res => {
-                        if (res.status >= 200 && res.status < 300) {
-                          return res.text();
+            };
+            const _formatBindings = bindings => {
+              const result = {};
+              for (const k in bindings) {
+                result['LINK_' + k] = bindings[k];
+              }
+              return result;
+            };
+
+            return traverseAsync(html, async el => {
+              if (el.tagName === 'LINK') {
+                const rel = el.getAttribute('rel');
+                if (rel === 'directory') {
+                  const name = el.getAttribute('name');
+                  const src = el.getAttribute('src');
+                  if (name && src) {
+                    await new Promise((accept, reject) => {
+                      const server = http.createServer(expressPut(src, path.join('/', name)));
+                      const localPort = port++;
+                      server.listen(localPort, err => {
+                        if (!err) {
+                          server.unref();
+
+                          const boundUrl = `http://127.0.0.1:${localPort}`;
+                          _setAttribute(el.attrs, 'boundUrl', boundUrl);
+                          bindings[name] = boundUrl;
+
+                          accept();
                         } else {
-                          return Promise.reject(new Error('invalid status code: ' + res.status));
+                          reject(err);
                         }
-                      })
-                      .then(s => {
+                      });
+                    });
+                  } else {
+                    console.warn(`${fileName}:${el.location.line}:${el.location.col}: invalid attributes in directory link ${JSON.stringify({name, src})}`);
+                  }
+                } else if (rel === 'hostScript') {
+                  const name = el.getAttribute('name');
+                  const src = el.getAttribute('src');
+                  const type = el.getAttribute('type');
+                  const mode = (() => {
+                    if (!type || /^(?:(?:text|application)\/javascript|application\/ecmascript)$/.test(type)) {
+                      return 'javascript';
+                    } else if (type === 'application/nodejs') {
+                      return 'nodejs';
+                    } else {
+                      return null;
+                    }
+                  })();
+                  if (name && src && mode) {
+                    if (/^#[a-z][a-z0-9\-]*$/i.test(src)) {
+                      const scriptEl = selector.find(html, src, true);
+                      if (scriptEl && scriptEl.tagName === 'SCRIPT' && scriptEl.childNodes.length > 0 && scriptEl.childNodes[0].nodeType === Node.TEXT_NODE) {
                         const localPort = port++;
                         windowEval(
-                          s,
+                          scriptEl.childNodes[0].value,
                           _makeContext(Object.assign({
                             PORT: localPort,
                           }, _formatBindings(bindings))),
                           url
                         );
-                        bindings[name] = `http://127.0.0.1:${localPort}`;
-                      });
-                  } else if (mode === 'nodejs') {
-                    return new Promise((accept, reject) => {
-                      tmp.dir((err, p) => {
-                        if (!err) {
-                          accept(p);
-                        } else {
-                          reject(err);
-                        }
-                      }, {
-                        keep: true,
-                        unsafeCleanup: true,
-                      });
-                    })
-                      .then(p => {
-                        return new Promise((accept, reject) => {
-                          const npmInstall = child_process.spawn(
-                            npmCommands.install.cmd[0],
-                            npmCommands.install.cmd.slice(1).concat([
-                              src,
-                              '--production',
-                              '--mutex', 'file:' + path.join(os.tmpdir(), '.intrakit-yarn-lock'),
-                            ]),
-                            {
-                              cwd: p,
-                              env: process.env,
-                            }
-                          );
-                          // npmInstall.stdout.pipe(process.stderr);
-                          npmInstall.stderr.pipe(process.stderr);
-                          npmInstall.on('exit', code => {
-                            if (code === 0) {
-                              accept();
+                        const boundUrl = `http://127.0.0.1:${localPort}`;
+                        _setAttribute(el.attrs, 'boundUrl', boundUrl);
+                        bindings[name] = boundUrl;
+                      } else {
+                        console.warn(`${fileName}:${el.location.line}:${el.location.col}: ignoring invalid link script tag reference ${JSON.stringify(src)}`);
+                      }
+                    } else {
+                      if (mode === 'javascript') {
+                        const url = new URL(src, baseUrl).href;
+                        await fetch(url)
+                          .then(res => {
+                            if (res.status >= 200 && res.status < 300) {
+                              return res.text();
                             } else {
-                              reject(new Error('npm install error: ' + code));
+                              return Promise.reject(new Error('invalid status code: ' + res.status));
                             }
+                          })
+                          .then(s => {
+                            const localPort = port++;
+                            windowEval(
+                              s,
+                              _makeContext(Object.assign({
+                                PORT: localPort,
+                              }, _formatBindings(bindings))),
+                              url
+                            );
+                            const boundUrl = `http://127.0.0.1:${localPort}`;
+                            _setAttribute(el.attrs, 'boundUrl', boundUrl);
+                            bindings[name] = boundUrl;
                           });
-                          npmInstall.on('error', err => {
-                            reject(err);
+                      } else if (mode === 'nodejs') {
+                        return new Promise((accept, reject) => {
+                          tmp.dir((err, p) => {
+                            if (!err) {
+                              accept(p);
+                            } else {
+                              reject(err);
+                            }
+                          }, {
+                            keep: true,
+                            unsafeCleanup: true,
                           });
                         })
-                          .then(() => new Promise((accept, reject) => {
-                            // console.log('need to run script', src, p); // XXX
-                            const packageJsonPath = path.join(p, 'package.json');
-                            fs.lstat(packageJsonPath, (err, stats) => {
-                              if (!err) {
+                          .then(p => {
+                            return new Promise((accept, reject) => {
+                              const npmInstall = child_process.spawn(
+                                npmCommands.install.cmd[0],
+                                npmCommands.install.cmd.slice(1).concat([
+                                  src,
+                                  '--production',
+                                  '--mutex', 'file:' + path.join(os.tmpdir(), '.intrakit-yarn-lock'),
+                                ]),
+                                {
+                                  cwd: p,
+                                  env: process.env,
+                                }
+                              );
+                              // npmInstall.stdout.pipe(process.stderr);
+                              npmInstall.stderr.pipe(process.stderr);
+                              npmInstall.on('exit', code => {
+                                if (code === 0) {
+                                  accept();
+                                } else {
+                                  reject(new Error('npm install error: ' + code));
+                                }
+                              });
+                              npmInstall.on('error', err => {
+                                reject(err);
+                              });
+                            })
+                              .then(() => new Promise((accept, reject) => {
+                                // console.log('need to run script', src, p); // XXX
+                                const packageJsonPath = path.join(p, 'package.json');
+                                fs.lstat(packageJsonPath, (err, stats) => {
+                                  if (!err) {
+                                    fs.readFile(packageJsonPath, 'utf8', (err, s) => {
+                                      if (!err) {
+                                        const j = JSON.parse(s);
+                                        const {dependencies} = j;
+                                        const moduleName = Object.keys(dependencies)[0];
+                                        accept(moduleName);
+                                      } else {
+                                        reject(err);
+                                      }
+                                    });
+                                  } else {
+                                    reject(err);
+                                  }
+                                });
+                              }))
+                              .then(moduleName => new Promise((accept, reject) => {
+                                const packageJsonPath = path.join(p, 'node_modules', moduleName, 'package.json');
                                 fs.readFile(packageJsonPath, 'utf8', (err, s) => {
                                   if (!err) {
                                     const j = JSON.parse(s);
-                                    const {dependencies} = j;
-                                    const moduleName = Object.keys(dependencies)[0];
-                                    accept(moduleName);
+                                    const {main: mainPath} = j;
+                                    // console.log('got j', p, j);
+                                    const mainScriptPath = path.join(p, 'node_modules', moduleName, mainPath);
+                                    fs.readFile(mainScriptPath, 'utf8', (err, s) => {
+                                      if (!err) {
+                                        const localPort = port++;
+
+                                        let err;
+                                        try {
+                                          windowEval(
+                                            s,
+                                            _makeContext(Object.assign({
+                                              PORT: localPort,
+                                            }, _formatBindings(bindings))),
+                                            path.join(src, p)
+                                          );
+                                        } catch(e) {
+                                          err = e;
+                                        }
+
+                                        if (!err) {
+                                          const boundUrl = `http://127.0.0.1:${localPort}`;
+                                          _setAttribute(el.attrs, 'boundUrl', boundUrl);
+                                          bindings[name] = boundUrl;
+
+                                          accept();
+                                        } else {
+                                          reject(err);
+                                        }
+                                      } else {
+                                        reject(err);
+                                      }
+                                    });
                                   } else {
                                     reject(err);
                                   }
                                 });
-                              } else {
-                                reject(err);
-                              }
-                            });
-                          }))
-                          .then(moduleName => new Promise((accept, reject) => {
-                            const packageJsonPath = path.join(p, 'node_modules', moduleName, 'package.json');
-                            fs.readFile(packageJsonPath, 'utf8', (err, s) => {
-                              if (!err) {
-                                const j = JSON.parse(s);
-                                const {main: mainPath} = j;
-                                // console.log('got j', p, j);
-                                const mainScriptPath = path.join(p, 'node_modules', moduleName, mainPath);
-                                fs.readFile(mainScriptPath, 'utf8', (err, s) => {
-                                  if (!err) {
-                                    const localPort = port++;
-
-                                    let err;
-                                    try {
-                                      windowEval(
-                                        s,
-                                        _makeContext(Object.assign({
-                                          PORT: localPort,
-                                        }, _formatBindings(bindings))),
-                                        path.join(src, p)
-                                      );
-                                    } catch(e) {
-                                      err = e;
-                                    }
-
-                                    if (!err) {
-                                      bindings[name] = `http://127.0.0.1:${localPort}`;
-                                      accept();
-                                    } else {
-                                      reject(err);
-                                    }
-                                  } else {
-                                    reject(err);
-                                  }
-                                });
-                              } else {
-                                reject(err);
-                              }
-                            });
-                          }));
-                      });
+                              }));
+                          });
+                      }
+                    }
+                  } else {
+                    console.warn(`${fileName}:${el.location.line}:${el.location.col}: invalid link hostScript arguments ${JSON.stringify({name, src, type})}`);
                   }
+                } else {
+                  console.warn(`${fileName}:${el.location.line}:${el.location.col}: ignoring unknown link rel ${JSON.stringify(rel)}`);
                 }
-              } else {
-                console.warn(`${fileName}:${el.location.line}:${el.location.col}: invalid link hostScript arguments ${JSON.stringify({name, src, type})}`);
               }
-            } else {
-              console.warn(`${fileName}:${el.location.line}:${el.location.col}: ignoring unknown link rel ${JSON.stringify(rel)}`);
-            }
-          }
-        });
-      } else {
-        throw err;
-      }
-    });
+            });
+          });
+      });
   } else {
     console.warn('usage: intrakit <fileName>');
     process.exit(1);
