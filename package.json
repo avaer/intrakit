@@ -19,12 +19,8 @@
   "dependencies": {
     "express": "^4.16.3",
     "express-put": "0.0.3",
-    "html-el": "0.0.2",
-    "parse5": "^4.0.0",
-    "selector-lite": "^0.1.1",
     "tmp": "0.0.33",
     "window-eval-native": "0.0.3",
-    "window-fetch": "0.0.5",
-    "yarn": "^1.5.1"
+    "wld": "0.0.11"
   }
 }
